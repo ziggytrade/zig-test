@@ -47,7 +47,7 @@ else()
         FetchContent_Declare(
             plist_proj
             GIT_REPOSITORY https://github.com/Dadoum/libplist-d
-            GIT_TAG d494cf3fe79a2bb20583173c0c8cf85ef33b719e
+            GIT_TAG 30d152e88767611e10048b25777ecb5f9075f87c
             PATCH_COMMAND ${DUB_DIRECTORY}/CMakeTmp/DubToCMake -c static -s plist-d
         )
         FetchContent_MakeAvailable(plist_proj)
@@ -67,7 +67,7 @@ else()
     endif()
 endif()
 
-target_link_libraries(provision PUBLIC plist slf4d)
+target_link_libraries(provision PUBLIC plist slf4d requests)
 
 set(RETRIEVE_HEADERS_SOURCE_DIR "retrieve_headers/")
 file(GLOB_RECURSE RETRIEVE_HEADERS_D_SOURCES "${RETRIEVE_HEADERS_SOURCE_DIR}*.d")

@@ -7,11 +7,14 @@ import std.digest.sha;
 import file = std.file;
 import std.format;
 import std.json;
-import std.net.curl;
 import std.path;
 import std.string;
 
+import requests;
+
 import slf4d;
+
+import provision.compat.general;
 
 version (LibPlist) {
     import plist;
@@ -33,18 +36,18 @@ alias ADIDispose_t = extern(C) int function(void*);
 alias ADIOTPRequest_t = extern(C) int function(ulong, ubyte**, uint*, ubyte**, uint*);
 
 public class ADI {
-    private ADILoadLibraryWithPath_t pADILoadLibraryWithPath;
-    private ADISetAndroidID_t pADISetAndroidID;
-    private ADISetProvisioningPath_t pADISetProvisioningPath;
+    package ADILoadLibraryWithPath_t pADILoadLibraryWithPath;
+    package ADISetAndroidID_t pADISetAndroidID;
+    package ADISetProvisioningPath_t pADISetProvisioningPath;
 
-    private ADIProvisioningErase_t pADIProvisioningErase;
-    private ADISynchronize_t pADISynchronize;
-    private ADIProvisioningDestroy_t pADIProvisioningDestroy;
-    private ADIProvisioningEnd_t pADIProvisioningEnd;
-    private ADIProvisioningStart_t pADIProvisioningStart;
-    private ADIGetLoginCode_t pADIGetLoginCode;
-    private ADIDispose_t pADIDispose;
-    private ADIOTPRequest_t pADIOTPRequest;
+    package ADIProvisioningErase_t pADIProvisioningErase;
+    package ADISynchronize_t pADISynchronize;
+    package ADIProvisioningDestroy_t pADIProvisioningDestroy;
+    package ADIProvisioningEnd_t pADIProvisioningEnd;
+    package ADIProvisioningStart_t pADIProvisioningStart;
+    package ADIGetLoginCode_t pADIGetLoginCode;
+    package ADIDispose_t pADIDispose;
+    package ADIOTPRequest_t pADIOTPRequest;
 
     private AndroidLibrary storeServicesCore;
     private Logger logger;
@@ -56,7 +59,7 @@ public class ADI {
 
     public void provisioningPath(string path) {
         __provisioningPath = path;
-        pADISetProvisioningPath(path.toStringz).unwrapADIError();
+        androidInvoke!pADISetProvisioningPath(path.toStringz).unwrapADIError();
     }
 
     private string __identifier = null;
@@ -66,7 +69,7 @@ public class ADI {
 
     public void identifier(string identifier) {
         __identifier = identifier;
-        pADISetAndroidID(identifier.ptr, cast(uint) identifier.length).unwrapADIError();
+        androidInvoke!pADISetAndroidID(identifier.ptr, cast(uint) identifier.length).unwrapADIError();
     }
 
     public this(string libraryPath) {
@@ -117,30 +120,45 @@ public class ADI {
     }
 
     public void loadLibrary(string libraryPath) {
-        pADILoadLibraryWithPath(libraryPath.toStringz).unwrapADIError();
+        androidInvoke!pADILoadLibraryWithPath(cast(const(char*)) libraryPath.toStringz).unwrapADIError();
     }
 
     public void eraseProvisioning(ulong dsId) {
-        pADIProvisioningErase(dsId).unwrapADIError();
+        androidInvoke!pADIProvisioningErase(dsId).unwrapADIError();
     }
 
     struct SynchronizationResumeMetadata {
-        public ubyte[] synchronizationResumeMetadata;
-        public ubyte[] machineIdentifier;
+        public ubyte[] _synchronizationResumeMetadata;
+        public ubyte[] _machineIdentifier;
         private ADI adi;
 
-        @disable this();
-        @disable this(this);
+        this(this) {
+            _synchronizationResumeMetadata = _synchronizationResumeMetadata.dup;
+            _machineIdentifier = _machineIdentifier.dup;
+            adi = null;
+        }
 
         this(ADI adiInstance, ubyte* srm, uint srmLength, ubyte* mid, uint midLength) {
             adi = adiInstance;
-            synchronizationResumeMetadata = srm[0..srmLength];
-            machineIdentifier = mid[0..midLength];
+            _synchronizationResumeMetadata = srm[0..srmLength];
+            _machineIdentifier = mid[0..midLength];
         }
 
         ~this() {
-            adi.dispose(synchronizationResumeMetadata.ptr);
-            adi.dispose(machineIdentifier.ptr);
+            if (adi) {
+                adi.dispose(_synchronizationResumeMetadata.ptr);
+                adi.dispose(_machineIdentifier.ptr);
+            }
+        }
+
+        pragma(inline, true)
+        auto synchronizationResumeMetadata() {
+            return _synchronizationResumeMetadata;
+        }
+
+        pragma(inline, true)
+        auto machineIdentifier() {
+            return _machineIdentifier;
         }
     }
 
@@ -150,7 +168,7 @@ public class ADI {
         ubyte* mid;
         uint midLength;
 
-        pADISynchronize(
+        androidInvoke!pADISynchronize(
             dsId,
             serverIntermediateMetadata.ptr,
  cast(uint) serverIntermediateMetadata.length,
@@ -164,11 +182,11 @@ public class ADI {
     }
 
     public void destroyProvisioning(uint session) {
-        pADIProvisioningDestroy(session).unwrapADIError();
+        androidInvoke!pADIProvisioningDestroy(session).unwrapADIError();
     }
 
     public void endProvisioning(uint session, ubyte[] persistentTokenMetadata, ubyte[] trustKey) {
-        pADIProvisioningEnd(
+        androidInvoke!pADIProvisioningEnd(
             session,
             persistentTokenMetadata.ptr,
  cast(uint) persistentTokenMetadata.length,
@@ -178,21 +196,35 @@ public class ADI {
     }
 
     struct ClientProvisioningIntermediateMetadata {
-        public ubyte[] clientProvisioningIntermediateMetadata;
-        public uint session;
+        public ubyte[] _clientProvisioningIntermediateMetadata;
+        public uint _session;
         private ADI adi;
 
-        @disable this();
-        @disable this(this);
+        this(this) {
+            _clientProvisioningIntermediateMetadata = _clientProvisioningIntermediateMetadata.dup;
+            adi = null;
+        }
 
         this(ADI adiInstance, ubyte* cpim, uint cpimLength, uint session) {
             adi = adiInstance;
-            clientProvisioningIntermediateMetadata = cpim[0..cpimLength];
-            this.session = session;
+            _clientProvisioningIntermediateMetadata = cpim[0..cpimLength];
+            this._session = session;
         }
 
         ~this() {
-            adi.dispose(clientProvisioningIntermediateMetadata.ptr);
+            if (adi) {
+                adi.dispose(_clientProvisioningIntermediateMetadata.ptr);
+            }
+        }
+
+        pragma(inline, true)
+        auto clientProvisioningIntermediateMetadata() {
+            return _clientProvisioningIntermediateMetadata;
+        }
+
+        pragma(inline, true)
+        auto session() {
+            return _session;
         }
     }
 
@@ -201,7 +233,7 @@ public class ADI {
         uint cpimLength;
         uint session;
 
-        pADIProvisioningStart(
+        androidInvoke!pADIProvisioningStart(
             dsId,
             serverProvisioningIntermediateMetadata.ptr,
  cast(uint) serverProvisioningIntermediateMetadata.length,
@@ -214,7 +246,7 @@ public class ADI {
     }
 
     public bool isMachineProvisioned(ulong dsId) {
-        int errorCode = pADIGetLoginCode(dsId);
+        int errorCode = androidInvoke!pADIGetLoginCode(dsId);
 
         if (errorCode == 0) {
             return true;
@@ -226,26 +258,41 @@ public class ADI {
     }
 
     public void dispose(void* ptr) {
-        pADIDispose(ptr).unwrapADIError();
+        androidInvoke!pADIDispose(ptr).unwrapADIError();
     }
 
     struct OneTimePassword {
-        public ubyte[] oneTimePassword;
-        public ubyte[] machineIdentifier;
+        public ubyte[] _oneTimePassword;
+        public ubyte[] _machineIdentifier;
         private ADI adi;
 
-        @disable this();
-        @disable this(this);
+        this(this) {
+            _oneTimePassword = _oneTimePassword.dup;
+            _machineIdentifier = _machineIdentifier.dup;
+            adi = null;
+        }
 
         this(ADI adiInstance, ubyte* otp, uint otpLength, ubyte* mid, uint midLength) {
             adi = adiInstance;
-            oneTimePassword = otp[0..otpLength];
-            machineIdentifier = mid[0..midLength];
+            _oneTimePassword = otp[0..otpLength];
+            _machineIdentifier = mid[0..midLength];
         }
 
         ~this() {
-            adi.dispose(oneTimePassword.ptr);
-            adi.dispose(machineIdentifier.ptr);
+            if (adi) {
+                adi.dispose(_oneTimePassword.ptr);
+                adi.dispose(_machineIdentifier.ptr);
+            }
+        }
+
+        pragma(inline, true)
+        auto oneTimePassword() {
+            return _oneTimePassword;
+        }
+
+        pragma(inline, true)
+        auto machineIdentifier() {
+            return _machineIdentifier;
         }
     }
 
@@ -255,7 +302,7 @@ public class ADI {
         ubyte* mid;
         uint midLength;
 
-        pADIOTPRequest(
+        androidInvoke!pADIOTPRequest(
             dsId,
             &mid,
             &midLength,
@@ -292,8 +339,10 @@ public class Device {
     // string romAddress;
     // string machineSerialNumber;
 
-    bool initialized = false;
+    bool _initialized = false;
     string path;
+
+    bool initialized() { return _initialized; }
 
     this(string filePath) {
         path = filePath;
@@ -304,7 +353,7 @@ public class Device {
                 serverFriendlyDescription = deviceFile[serverFriendlyDescriptionJson].str();
                 adiIdentifier = deviceFile[adiIdentifierJson].str();
                 localUserUUID = deviceFile[localUserUUIDJson].str();
-                initialized = true;
+                _initialized = true;
             } catch (Throwable) { /+ do nothing +/ }
         }
     }
@@ -317,13 +366,13 @@ public class Device {
     public void write() {
         if (path) {
             file.write(path, deviceData.toString());
-            initialized = true;
+            _initialized = true;
         }
     }
 }
 
 public class ProvisioningSession {
-    private HTTP httpClient;
+    private Request request;
     private string[string] urlBag;
 
     private ADI adi;
@@ -333,32 +382,34 @@ public class ProvisioningSession {
         this.adi = adi;
         this.device = device;
 
-        httpClient = HTTP();
+        request = Request();
 
-        httpClient.setUserAgent("akd/1.0 CFNetwork/1404.0.5 Darwin/22.3.0");
-        httpClient.handle.set(CurlOption.ssl_verifypeer, 0);
+        request.sslSetVerifyPeer(false);
+        request.addHeaders([
+            "User-Agent": "akd/1.0 CFNetwork/1404.0.5 Darwin/22.3.0",
 
-        // they are somehow not using the plist content-type in AuthKit
-        httpClient.addRequestHeader("Content-Type", "application/x-www-form-urlencoded");
-        httpClient.addRequestHeader("Connection", "keep-alive");
+            // they are somehow not using the plist content-type in AuthKit
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Connection": "keep-alive",
 
-        httpClient.addRequestHeader("X-Mme-Device-Id", device.uniqueDeviceIdentifier);
-        // on macOS, MMe for the Client-Info header is written with 2 caps, while on Windows it is Mme...
-        // and HTTP headers are supposed to be case-insensitive in the HTTP spec...
-        httpClient.addRequestHeader("X-MMe-Client-Info", device.serverFriendlyDescription);
-        httpClient.addRequestHeader("X-Apple-I-MD-LU", device.localUserUUID);
+            "X-Mme-Device-Id": device.uniqueDeviceIdentifier,
+            // on macOS, MMe for the Client-Info header is written with 2 caps, while on Windows it is Mme...
+            // and HTTP headers are supposed to be case-insensitive in the HTTP spec...
+            "X-MMe-Client-Info": device.serverFriendlyDescription,
+            "X-Apple-I-MD-LU": device.localUserUUID,
 
-        // httpClient.addRequestHeader("X-Apple-I-MLB", device.logicBoardSerialNumber); // 17 letters, uppercase in Apple's base 34
-        // httpClient.addRequestHeader("X-Apple-I-ROM", device.romAddress); // 6 bytes, lowercase hexadecimal
-        // httpClient.addRequestHeader("X-Apple-I-SRL-NO", device.machineSerialNumber); // 12 letters, uppercase
+            // "X-Apple-I-MLB": device.logicBoardSerialNumber, // 17 letters, uppercase in Apple's base 34
+            // "X-Apple-I-ROM": device.romAddress, // 6 bytes, lowercase hexadecimal
+            // "X-Apple-I-SRL-NO": device.machineSerialNumber, // 12 letters, uppercase
 
-        // different apps can be used, I already saw fmfd and Setup here
-        // and Reprovision uses Xcode in some requests, so maybe it is possible here too.
-        httpClient.addRequestHeader("X-Apple-Client-App-Name", "Setup");
+            // different apps can be used, I already saw fmfd and Setup here
+            // and Reprovision uses Xcode in some requests, so maybe it is possible here too.
+            "X-Apple-Client-App-Name": "Setup",
+        ]);
     }
 
     public void loadURLBag() {
-        string content = cast(string) std.net.curl.get("https://gsa.apple.com/grandslam/GsService2/lookup", httpClient);
+        string content = request.get("https://gsa.apple.com/grandslam/GsService2/lookup").responseBody.data!string();
 
         version (LibPlist) {
             PlistDict plist = cast(PlistDict) Plist.fromXml(content);
@@ -389,8 +440,8 @@ public class ProvisioningSession {
 
         import std.datetime.systime;
 
-        httpClient.addRequestHeader("X-Apple-I-Client-Time", Clock.currTime().toISOExtString());
-        string startProvisioningPlist = cast(string) post(urlBag["midStartProvisioning"],
+        request.headers["X-Apple-I-Client-Time"] = Clock.currTime().stripMilliseconds().toISOExtString();
+        string startProvisioningPlist = request.post(urlBag["midStartProvisioning"],
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>
 <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">
 <plist version=\"1.0\">
@@ -400,7 +451,7 @@ public class ProvisioningSession {
 \t<key>Request</key>
 \t<dict/>
 </dict>
-</plist>", httpClient);
+</plist>").responseBody.data!string();
 
         scope string spimStr;
         {
@@ -421,8 +472,8 @@ public class ProvisioningSession {
         scope auto cpim = adi.startProvisioning(dsId, spim);
         scope (failure) try { adi.destroyProvisioning(cpim.session); } catch(Throwable) {}
 
-        httpClient.addRequestHeader("X-Apple-I-Client-Time", Clock.currTime().toISOExtString());
-        string endProvisioningPlist = cast(string) post(urlBag["midFinishProvisioning"], format!"<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+        request.headers["X-Apple-I-Client-Time"] = Clock.currTime().stripMilliseconds().toISOExtString();
+        string endProvisioningPlist = request.post(urlBag["midFinishProvisioning"], format!"<?xml version=\"1.0\" encoding=\"UTF-8\"?>
 <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">
 <plist version=\"1.0\">
 <dict>
@@ -434,7 +485,7 @@ public class ProvisioningSession {
 \t\t<string>%s</string>
 \t</dict>
 </dict>
-</plist>"(Base64.encode(cpim.clientProvisioningIntermediateMetadata)), httpClient);
+</plist>"(Base64.encode(cpim.clientProvisioningIntermediateMetadata))).responseBody.data!string();
 
         scope ulong routingInformation;
         scope ubyte[] persistentTokenMetadata;
@@ -581,4 +632,10 @@ public class ADIException: Exception {
     ADIError adiError() {
         return errorCode;
     }
+}
+
+import std.datetime: dur, SysTime;
+private SysTime stripMilliseconds(return SysTime time) {
+    time.fracSecs = dur!"msecs"(0);
+    return time;
 }
